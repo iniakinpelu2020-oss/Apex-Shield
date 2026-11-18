@@ -441,16 +441,23 @@ function boot() {
   });
 
   renderQueue();
-
-  if ('serviceWorker' in navigator && location.protocol === 'https:') {
-    navigator.serviceWorker.register('sw.js').catch(() => {
-      toast('Offline shell unavailable in this browser');
-    });
-  }
 }
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', boot);
 } else {
   boot();
+}
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/sw.js', { updateViaCache: 'none' })
+      .then((reg) => {
+        console.log('SW registered:', reg.scope);
+      })
+      .catch((err) => {
+        console.error('SW registration failed:', err);
+      });
+  });
 }
