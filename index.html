@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Apex Shield — malware triage</title>
+<meta name="description" content="Local file and APK triage. Nothing is uploaded; ClamAV runs where it can actually run.">
+<meta name="theme-color" content="#0b0e11">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body data-panel="file">
+
+<header class="top">
+  <div class="brand">
+    <span class="mark" aria-hidden="true">◤</span>
+    <div>
+      <h1>APEX-SHIELD</h1>
+      <p>malware triage</p>
+    </div>
+  </div>
+  <div class="net"><span id="netStatus" class="dot"></span><span id="netLabel">ONLINE</span></div>
+</header>
+
+<nav class="tabs" role="tablist" aria-label="Modules">
+  <button class="tab active" data-panel="file" role="tab" aria-selected="true"><span class="n">1</span> File</button>
+  <button class="tab" data-panel="apk" role="tab" aria-selected="false"><span class="n">2</span> APK</button>
+  <button class="tab" data-panel="queue" role="tab" aria-selected="false"><span class="n">3</span> Setup</button>
+</nav>
+
+<main>
+
+  <section class="panel" id="panel-file" role="tabpanel">
+    <h2>File triage</h2>
+    <p class="lede">Hash it, type it, and see what it really is. The file is read here; nothing is uploaded.</p>
+
+    <div class="card">
+      <label class="drop" id="dropZone" for="fileInput">
+        <span class="drop-title">Drop a file here</span>
+        <span class="drop-sub">or click to choose one</span>
+        <input type="file" id="fileInput" hidden>
+      </label>
+      <dl class="kv" id="fileOut" hidden></dl>
+      <div class="verdict" id="fileVerdict" hidden></div>
+      <p class="hint" id="fileHint">Hashes, magic bytes and archive layout are computed in this tab. That is all a browser can honestly do.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>Scan it where ClamAV lives</h3>
+        <span class="badge bad">NOT IN A BROWSER</span>
+      </div>
+      <p>A signature match needs the daily ClamAV database, which is hundreds of megabytes and belongs on a machine with a disk. A browser has neither, so Shield hands you the command instead of inventing a verdict.</p>
+      <pre class="code" id="clamCmd">clamscan --infected --recursive &lt;path-to-file&gt;</pre>
+      <div class="row">
+        <button class="btn" data-copy="clamCmd">Copy command</button>
+        <button class="btn ghost" id="clearFile">Clear</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>What a hash proves</h3>
+        <span class="badge warn">READ THIS</span>
+      </div>
+      <ul class="bullets">
+        <li>An exact SHA-256 match against a known sample is strong evidence. A hash nobody has seen says nothing about intent.</li>
+        <li>"Clean" from any scanner means "nothing known", never "safe". A freshly built binary is in no database.</li>
+        <li>Compare a second copy by hashing it here: one changed byte changes both hashes completely.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-apk" role="tabpanel" hidden>
+    <h2>APK static analysis</h2>
+    <p class="lede">Permissions, flags and signing scheme straight from the binary manifest. No install, no network, no signature database.</p>
+
+    <div class="card">
+      <label class="drop" id="apkZone" for="apkInput">
+        <span class="drop-title">Drop an APK</span>
+        <span class="drop-sub">or click to choose one</span>
+        <input type="file" id="apkInput" accept=".apk,application/vnd.android.package-archive" hidden>
+      </label>
+      <p class="hint" id="apkHint">Reads the zip, decodes the compiled AndroidManifest.xml, and looks for v1, v2 and v3 signatures.</p>
+      <dl class="kv" id="apkOut" hidden></dl>
+      <div class="flags" id="apkFlags"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>Permissions</h3>
+        <span class="badge" id="permCount">none yet</span>
+      </div>
+      <ul class="perms" id="permList">
+        <li class="empty">Drop an APK to see what it asks for.</li>
+      </ul>
+      <p class="hint">Dangerous permissions can be misused without the user noticing. Presence alone is not a finding: a torch app needs the camera.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>What this cannot tell you</h3>
+        <span class="badge warn">SCOPE</span>
+      </div>
+      <ul class="bullets">
+        <li>Whether the code is malicious. That needs a signature database or a person reading the DEX.</li>
+        <li>Whether the signature is <em>trusted</em>: this reports the scheme and the signer file, not the certificate chain.</li>
+        <li>Whether a store shipped it. Sideloaded and store builds can look identical from the manifest.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="panel" id="panel-queue" role="tabpanel" hidden>
+    <h2>Queue and setup</h2>
+    <p class="lede">The scan runs on the machine behind your Cloudflare Tunnel. This page is the console in front of it — agree the contract before writing either side.</p>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>The contract</h3>
+        <span class="badge ok">DESIGNED</span>
+      </div>
+      <pre class="code" id="contract">POST /scan
+{ "object": "shield/incoming/&lt;sha256&gt;.apk" }
+
+202 { "id": "&lt;id&gt;", "state": "pending" }
+
+GET /scan/&lt;id&gt;
+200 { "state": "pending" | "done",
+      "verdict": "clean" | "infected",
+      "engine": "clamav 1.4",
+      "signatures": "&lt;version and date&gt;",
+      "report": "&lt;clamscan output&gt;" }</pre>
+      <p class="hint">The Worker never scans. It stores the object reference and the verdict, and the VPS pulls from B2, runs clamscan, and writes the result back.</p>
+      <div class="row"><button class="btn" data-copy="contract">Copy contract</button></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>VPS: ClamAV</h3>
+        <span class="badge bad">NEEDS A MACHINE</span>
+      </div>
+      <pre class="code" id="clamSet">sudo apt install -y clamav
+sudo freshclam
+clamscan --infected --recursive --log=/var/log/shield.log /srv/shield/incoming</pre>
+      <p class="hint">Run the queue worker as a systemd service so a reboot does not silently stop scanning.</p>
+      <div class="row"><button class="btn" data-copy="clamSet">Copy setup</button></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>URLs: Safe Browsing</h3>
+        <span class="badge warn">FREE KEY NEEDED</span>
+      </div>
+      <p>Reimplementing URL reputation from scratch would be worse than useless. Google Safe Browsing has a free quota; the key belongs in the Worker's secrets, never in this page.</p>
+      <pre class="code" id="sbCmd">curl -sS -X POST \
+  "https://safebrowsing.googleapis.com/v4/threatMatches:find?key=$SAFE_BROWSING_KEY" \
+  -H 'content-type: application/json' \
+  -d '{"client":{"clientId":"apex-shield","clientVersion":"1"},
+       "threatInfo":{"threatTypes":["MALWARE","SOCIAL_ENGINEERING","UNWANTED_SOFTWARE"],
+       "platformTypes":["ANY_PLATFORM"],
+       "threatEntryTypes":["URL"],
+       "threatEntries":[{"url":"https://example.com"}]}}'</pre>
+      <div class="row"><button class="btn" data-copy="sbCmd">Copy request</button></div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h3>Checklist</h3>
+        <span class="badge" id="readyCount">0 of 4</span>
+      </div>
+      <ul class="checklist" id="checklist"></ul>
+      <p class="hint">Tick these in order. Each one is verifiable on its own, so a half-built Shield still tells you where it stopped.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="footer">
+  <span class="blink">◤</span> ClamAV cannot run in a browser · triage only what you are authorised to hold
+</footer>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script src="core.js" defer></script>
+<script src="apk.js" defer></script>
+<script src="app.js" defer></script>
+</body>
+</html>
